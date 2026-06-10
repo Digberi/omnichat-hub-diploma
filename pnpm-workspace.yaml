@@ -1,0 +1,17 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'infra/*'
+  - 'tests/*'
+
+# Allow build/prepare scripts to run for packages pnpm v10 would
+# otherwise block. `@digberi/pulumi-infisical` is a git-installed dep
+# whose `prepare: tsc` populates dist/ during install; `esbuild` and
+# `protobufjs` show up as transitive deps of @pulumi/pulumi and pnpm's
+# git-prepare flow needs to invoke their install lifecycle so the inner
+# `pnpm install` (run before prepare) doesn't abort with
+# ERR_PNPM_IGNORED_BUILDS.
+onlyBuiltDependencies:
+  - '@digberi/pulumi-infisical'
+  - 'esbuild'
+  - 'protobufjs'

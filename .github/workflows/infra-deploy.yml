@@ -1,0 +1,212 @@
+name: Infra Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+      - 'apps/**'
+      - 'packages/**'
+      - 'scripts/infra/**'
+      - '.github/workflows/infra-*.yml'
+      - '.github/workflows/iac-security.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'turbo.json'
+  workflow_dispatch:
+
+concurrency:
+  group: infra-deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    # Self-hosted on dev-ci (192.168.0.242). Switched off ubuntu-latest after
+    # GitHub-hosted runners stopped scheduling jobs (org spending limit, 2026-05-18).
+    # Prod secrets (DO token, Pulumi token, Cloudflare, Vercel, Infisical, Sentry,
+    # channel OAuth) are exposed to the dev-ci shell env during this run — acceptable
+    # because the box is owned and operated by the org admin.
+    runs-on: [self-hosted, dev-ci]
+    timeout-minutes: 60
+    environment:
+      name: production
+      url: https://app.omnichat.to
+    env:
+      PNPM_STORE_DIR: ${{ github.workspace }}/../../cache/pnpm-store
+      PULUMI_ORG: ${{ vars.PULUMI_ORG }}
+      PULUMI_PROJECT: ${{ vars.PULUMI_PROJECT }}
+      PULUMI_STACK: ${{ vars.PULUMI_STACK }}
+      ROOT_DOMAIN: ${{ vars.ROOT_DOMAIN }}
+      APP_SUBDOMAIN: ${{ vars.APP_SUBDOMAIN }}
+      API_SUBDOMAIN: ${{ vars.API_SUBDOMAIN }}
+      REPO_SLUG: ${{ vars.REPO_SLUG }}
+      REPO_BRANCH: ${{ vars.REPO_BRANCH }}
+      REGION: ${{ vars.REGION }}
+      DO_PROJECT_NAME: ${{ vars.DO_PROJECT_NAME }}
+      VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      VERCEL_PROJECT_NAME: ${{ vars.VERCEL_PROJECT_NAME }}
+      CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+      POSTGRES_SIZE: ${{ vars.POSTGRES_SIZE }}
+      POSTGRES_VERSION: ${{ vars.POSTGRES_VERSION }}
+      REDIS_SIZE: ${{ vars.REDIS_SIZE }}
+      REDIS_VERSION: ${{ vars.REDIS_VERSION }}
+      EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+      EMAIL_REPLY_TO: ${{ vars.EMAIL_REPLY_TO }}
+      SENTRY_ENVIRONMENT: ${{ vars.SENTRY_ENVIRONMENT }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT_WEB: ${{ vars.SENTRY_PROJECT_WEB }}
+      SENTRY_URL: ${{ vars.SENTRY_URL }}
+      SENTRY_TRACES_SAMPLE_RATE: ${{ vars.SENTRY_TRACES_SAMPLE_RATE }}
+      GRAFANA_CREATE_CLOUD_STACK: ${{ vars.GRAFANA_CREATE_CLOUD_STACK }}
+      GRAFANA_CLOUD_REGION: ${{ vars.GRAFANA_CLOUD_REGION }}
+      GRAFANA_STACK_SLUG: ${{ vars.GRAFANA_STACK_SLUG }}
+      GRAFANA_STACK_NAME: ${{ vars.GRAFANA_STACK_NAME }}
+      CHANNEL_SYNC_ROZETKA_ENABLED: ${{ vars.CHANNEL_SYNC_ROZETKA_ENABLED }}
+      CHANNEL_SYNC_ROZETKA_ORDERS_ENABLED: ${{ vars.CHANNEL_SYNC_ROZETKA_ORDERS_ENABLED }}
+      DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+      SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+      API_JWT_ACCESS_SECRET: ${{ secrets.API_JWT_ACCESS_SECRET }}
+      API_JWT_REFRESH_SECRET: ${{ secrets.API_JWT_REFRESH_SECRET }}
+      API_AUTH_OTP_PEPPER: ${{ secrets.API_AUTH_OTP_PEPPER }}
+      INFISICAL_DEPLOY_CLIENT_ID: ${{ secrets.INFISICAL_DEPLOY_CLIENT_ID }}
+      INFISICAL_DEPLOY_CLIENT_SECRET: ${{ secrets.INFISICAL_DEPLOY_CLIENT_SECRET }}
+      INFISICAL_KMS_PROJECT_ID: ${{ secrets.INFISICAL_KMS_PROJECT_ID }}
+      INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+      API_METRICS_TOKEN: ${{ secrets.API_METRICS_TOKEN }}
+      WORKERS_METRICS_TOKEN: ${{ secrets.WORKERS_METRICS_TOKEN }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
+      OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_API_DSN: ${{ secrets.SENTRY_API_DSN }}
+      SENTRY_WORKERS_DSN: ${{ secrets.SENTRY_WORKERS_DSN }}
+      SENTRY_WEB_DSN: ${{ secrets.SENTRY_WEB_DSN }}
+      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+      OTEL_COLLECTOR_INBOUND_TOKEN: ${{ secrets.OTEL_COLLECTOR_INBOUND_TOKEN }}
+      RELEASE_ID: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare persistent cache dirs
+        run: mkdir -p "${PNPM_STORE_DIR}"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.5.0
+
+      # PNPM_STORE_DIR env var is set at job level.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pulumi/auth-actions@v1
+        with:
+          organization: ${{ vars.PULUMI_ORG }}
+          requested-token-type: urn:pulumi:token-type:access_token:personal
+          scope: user:Digberi
+
+      - name: Auth for private @digberi/pulumi-infisical
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.DIGBERI_PULUMI_INFISICAL_DEPLOY_KEY }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate infra code
+        run: pnpm --filter @omnichat/pulumi-infra typecheck
+
+      - name: Configure Pulumi stack
+        run: bash scripts/infra/configure-pulumi-stack.sh
+
+      # Image build moved off-runner: the App spec in
+      # `infra/pulumi/src/digitalocean.ts` now uses `github:` source, so
+      # DO clones omnichat-hub via its GitHub App integration and runs
+      # `apps/{api,workers}/Dockerfile` on its own builders. Saves
+      # ~10-15 min per deploy on our side and removes the
+      # `@digberi/pulumi-infisical` auth dance from the docker build
+      # context. The previous DOCR push step + container registry resource
+      # are gone in the same commit.
+
+      - name: Pulumi up
+        run: |
+          set -o pipefail
+          pnpm --filter @omnichat/pulumi-infra exec pulumi up --stack "${PULUMI_ORG}/${PULUMI_PROJECT}/${PULUMI_STACK}" --yes --skip-preview 2>&1 | tee pulumi-up.txt
+
+      - name: Trigger DigitalOcean app deployment
+        run: |
+          APP_ID="$(cd infra/pulumi && pulumi stack output --stack "${PULUMI_ORG}/${PULUMI_PROJECT}/${PULUMI_STACK}" appPlatformId)"
+          echo "App Platform ID: ${APP_ID}"
+
+          DEPLOYMENT_ID="$(curl -fsS -X POST \
+            -H "Authorization: Bearer ${DIGITALOCEAN_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://api.digitalocean.com/v2/apps/${APP_ID}/deployments" \
+            -d '{"force_build":true}' | jq -r '.deployment.id')"
+
+          echo "Triggered DigitalOcean deployment: ${DEPLOYMENT_ID}"
+          echo "DO_DEPLOYMENT_ID=${DEPLOYMENT_ID}" >> "$GITHUB_ENV"
+
+      - name: Wait for DigitalOcean deployment
+        run: |
+          APP_ID="$(cd infra/pulumi && pulumi stack output --stack "${PULUMI_ORG}/${PULUMI_PROJECT}/${PULUMI_STACK}" appPlatformId)"
+
+          for _ in $(seq 1 60); do
+            PHASE="$(curl -fsS \
+              -H "Authorization: Bearer ${DIGITALOCEAN_TOKEN}" \
+              "https://api.digitalocean.com/v2/apps/${APP_ID}/deployments/${DO_DEPLOYMENT_ID}" | jq -r '.deployment.phase')"
+
+            echo "DigitalOcean deployment phase: ${PHASE}"
+
+            if [ "${PHASE}" = "ACTIVE" ]; then
+              exit 0
+            fi
+
+            if [ "${PHASE}" = "ERROR" ] || [ "${PHASE}" = "CANCELED" ]; then
+              echo "DigitalOcean deployment failed with phase ${PHASE}" >&2
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for DigitalOcean deployment ${DO_DEPLOYMENT_ID}" >&2
+          exit 1
+
+      - name: Export stack outputs
+        run: |
+          cd infra/pulumi
+          pulumi stack output --stack "${PULUMI_ORG}/${PULUMI_PROJECT}/${PULUMI_STACK}" --json > stack-outputs.json
+
+      - name: Upload deploy log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulumi-up-${{ github.run_id }}
+          path: |
+            pulumi-up.txt
+            infra/pulumi/stack-outputs.json
+
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo '## Infra deploy'
+            echo
+            echo "- stack: \\`${PULUMI_ORG}/${PULUMI_PROJECT}/${PULUMI_STACK}\\`"
+            echo "- app: \\`https://${APP_SUBDOMAIN}.${ROOT_DOMAIN}\\`"
+            echo "- api: \\`https://${API_SUBDOMAIN}.${ROOT_DOMAIN}\\`"
+            echo '- deployment path includes PRE_DEPLOY Prisma migration job'
+            echo '- review stack-outputs artifact for full resource outputs'
+          } >> "$GITHUB_STEP_SUMMARY"

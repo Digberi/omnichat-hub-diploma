@@ -1,0 +1,275 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-omnichat}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - omnichat_postgres_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      - omnichat-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - omnichat_redis_prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      - omnichat-net
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - omnichat_minio_prod:/data
+    networks:
+      - omnichat-net
+
+  minio-bootstrap:
+    image: minio/mc:latest
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      STORAGE_BUCKET: ${API_STORAGE_BUCKET:-omnichat}
+      STORAGE_ENDPOINT: http://minio:9000
+      ATTACHMENT_TTL_DAYS: ${API_ATTACHMENT_TTL_DAYS:-7}
+    command: >
+      sh -c '
+      set -eu
+      until mc alias set local ${STORAGE_ENDPOINT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} >/dev/null 2>&1; do
+        echo "waiting for minio"
+        sleep 1
+      done
+      mc mb --ignore-existing local/${STORAGE_BUCKET}
+      cat > /tmp/minio-lifecycle.json <<EOF_INNER
+      {
+        "Rules": [
+          {
+            "ID": "expire-attachments",
+            "Status": "Enabled",
+            "Filter": {
+              "Prefix": "attachments/"
+            },
+            "Expiration": {
+              "Days": ${ATTACHMENT_TTL_DAYS}
+            }
+          }
+        ]
+      }
+      EOF_INNER
+      mc ilm import local/${STORAGE_BUCKET} /tmp/minio-lifecycle.json
+      '
+    networks:
+      - omnichat-net
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${API_PORT:-4121}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      BULLMQ_PREFIX: ${BULLMQ_PREFIX:-omnichat:production}
+      SOCKETIO_REDIS_KEY: ${SOCKETIO_REDIS_KEY:-socket.io:production}
+      CORS_ORIGINS: ${API_CORS_ORIGINS}
+      PUBLIC_WEB_URL: ${API_PUBLIC_WEB_URL}
+      LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      SEARCH_DEFAULT_DAYS: ${API_SEARCH_DEFAULT_DAYS:-7}
+      SHORTLINK_TTL_DAYS: ${API_SHORTLINK_TTL_DAYS:-7}
+      ATTACHMENT_TTL_DAYS: ${API_ATTACHMENT_TTL_DAYS:-7}
+      STORAGE_ENDPOINT: ${API_STORAGE_ENDPOINT}
+      STORAGE_REGION: ${API_STORAGE_REGION}
+      STORAGE_BUCKET: ${API_STORAGE_BUCKET}
+      STORAGE_ACCESS_KEY: ${API_STORAGE_ACCESS_KEY}
+      STORAGE_SECRET_KEY: ${API_STORAGE_SECRET_KEY}
+      STORAGE_APPLY_LIFECYCLE: ${API_STORAGE_APPLY_LIFECYCLE:-0}
+      STORAGE_REQUEST_TIMEOUT_MS: ${API_STORAGE_REQUEST_TIMEOUT_MS:-5000}
+      STORAGE_RETRY_ATTEMPTS: ${API_STORAGE_RETRY_ATTEMPTS:-3}
+      STORAGE_RETRY_DELAY_MS: ${API_STORAGE_RETRY_DELAY_MS:-100}
+      STORAGE_ALERT_PING_MAX_AGE_MS: ${API_STORAGE_ALERT_PING_MAX_AGE_MS:-120000}
+      STORAGE_ALERT_FAILURE_RATE_WARN_PCT: ${API_STORAGE_ALERT_FAILURE_RATE_WARN_PCT:-5}
+      STORAGE_ALERT_FAILURE_RATE_CRITICAL_PCT: ${API_STORAGE_ALERT_FAILURE_RATE_CRITICAL_PCT:-20}
+      STORAGE_ALERT_AVG_DURATION_WARN_MS: ${API_STORAGE_ALERT_AVG_DURATION_WARN_MS:-1500}
+      STORAGE_ALERT_AVG_DURATION_CRITICAL_MS: ${API_STORAGE_ALERT_AVG_DURATION_CRITICAL_MS:-4000}
+      JWT_ACCESS_SECRET: ${API_JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${API_JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL_MIN: ${API_JWT_ACCESS_TTL_MIN:-15}
+      JWT_REFRESH_TTL_DAYS: ${API_JWT_REFRESH_TTL_DAYS:-30}
+      AUTH_OTP_PEPPER: ${API_AUTH_OTP_PEPPER}
+      AUTH_OTP_TTL_MIN: ${API_AUTH_OTP_TTL_MIN:-10}
+      AUTH_OTP_MAX_ATTEMPTS: ${API_AUTH_OTP_MAX_ATTEMPTS:-5}
+      AUTH_OTP_FIXED_CODE: ${API_AUTH_OTP_FIXED_CODE:-}
+      GOOGLE_CLIENT_ID: ${API_GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${API_GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_CALLBACK_URL: ${API_GOOGLE_CALLBACK_URL:-}
+      SENTRY_DSN: ${API_SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${API_SENTRY_TRACES_SAMPLE_RATE:-0.05}
+      SENTRY_ENVIRONMENT: ${API_SENTRY_ENVIRONMENT:-production}
+      SENTRY_RELEASE: ${API_SENTRY_RELEASE:-}
+      METRICS_TOKEN: ${API_METRICS_TOKEN}
+      LOKI_HOST: ${API_LOKI_HOST:-}
+      LOKI_USERNAME: ${API_LOKI_USERNAME:-}
+      LOKI_PASSWORD: ${API_LOKI_PASSWORD:-}
+      LOKI_BATCH_INTERVAL_SEC: ${API_LOKI_BATCH_INTERVAL_SEC:-5}
+      LOKI_BATCH_MAX_BUFFER: ${API_LOKI_BATCH_MAX_BUFFER:-10000}
+    ports:
+      - "${API_PORT:-4121}:4121"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4121/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - omnichat-net
+
+  workers:
+    build:
+      context: ../..
+      dockerfile: apps/workers/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      WORKERS_PORT: ${WORKERS_PORT:-4122}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      BULLMQ_PREFIX: ${BULLMQ_PREFIX:-omnichat:production}
+      SOCKETIO_REDIS_KEY: ${SOCKETIO_REDIS_KEY:-socket.io:production}
+      LOG_LEVEL: ${WORKERS_LOG_LEVEL:-info}
+      OUTBOX_POLL_INTERVAL_SEC: ${WORKERS_OUTBOX_POLL_INTERVAL_SEC:-60}
+      OUTBOX_MAX_ATTEMPTS: ${WORKERS_OUTBOX_MAX_ATTEMPTS:-10}
+      OUTBOX_LOCK_TTL_SEC: ${WORKERS_OUTBOX_LOCK_TTL_SEC:-300}
+      MAINTENANCE_INTERVAL_SEC: ${WORKERS_MAINTENANCE_INTERVAL_SEC:-60}
+      METRICS_ROLLUP_INTERVAL_SEC: ${WORKERS_METRICS_ROLLUP_INTERVAL_SEC:-3600}
+      CHANNEL_SYNC_STUB_ENABLED: ${WORKERS_CHANNEL_SYNC_STUB_ENABLED:-false}
+      CHANNEL_SYNC_INTERVAL_SEC: ${WORKERS_CHANNEL_SYNC_INTERVAL_SEC:-60}
+      CHANNEL_SYNC_STUB_MAX_ACCOUNTS: ${WORKERS_CHANNEL_SYNC_STUB_MAX_ACCOUNTS:-3}
+      CHANNEL_SYNC_PROM_ENABLED: ${WORKERS_CHANNEL_SYNC_PROM_ENABLED:-true}
+      CHANNEL_SYNC_PROM_MAX_ACCOUNTS: ${WORKERS_CHANNEL_SYNC_PROM_MAX_ACCOUNTS:-50}
+      CHANNEL_SYNC_PROM_LIMIT: ${WORKERS_CHANNEL_SYNC_PROM_LIMIT:-100}
+      PROM_API_BASE_URL: ${WORKERS_PROM_API_BASE_URL:-https://my.prom.ua/api/v1}
+      PROM_REQUEST_TIMEOUT_MS: ${WORKERS_PROM_REQUEST_TIMEOUT_MS:-8000}
+      PUSH_PROVIDER: ${WORKERS_PUSH_PROVIDER:-console}
+      EXPO_ACCESS_TOKEN: ${WORKERS_EXPO_ACCESS_TOKEN:-}
+      ATTACHMENT_TTL_DAYS: ${WORKERS_ATTACHMENT_TTL_DAYS:-7}
+      STORAGE_ENDPOINT: ${WORKERS_STORAGE_ENDPOINT}
+      STORAGE_REGION: ${WORKERS_STORAGE_REGION}
+      STORAGE_BUCKET: ${WORKERS_STORAGE_BUCKET}
+      STORAGE_ACCESS_KEY: ${WORKERS_STORAGE_ACCESS_KEY}
+      STORAGE_SECRET_KEY: ${WORKERS_STORAGE_SECRET_KEY}
+      STORAGE_REQUEST_TIMEOUT_MS: ${WORKERS_STORAGE_REQUEST_TIMEOUT_MS:-5000}
+      STORAGE_RETRY_ATTEMPTS: ${WORKERS_STORAGE_RETRY_ATTEMPTS:-3}
+      STORAGE_RETRY_DELAY_MS: ${WORKERS_STORAGE_RETRY_DELAY_MS:-100}
+      SENTRY_DSN: ${WORKERS_SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${WORKERS_SENTRY_TRACES_SAMPLE_RATE:-0.05}
+      SENTRY_ENVIRONMENT: ${WORKERS_SENTRY_ENVIRONMENT:-production}
+      SENTRY_RELEASE: ${WORKERS_SENTRY_RELEASE:-}
+      SENTRY_OUTBOX_BACKLOG_WARN: ${WORKERS_SENTRY_OUTBOX_BACKLOG_WARN:-200}
+      SENTRY_OUTBOX_BACKLOG_COOLDOWN_SEC: ${WORKERS_SENTRY_OUTBOX_BACKLOG_COOLDOWN_SEC:-300}
+      METRICS_TOKEN: ${WORKERS_METRICS_TOKEN}
+      LOKI_HOST: ${WORKERS_LOKI_HOST:-}
+      LOKI_USERNAME: ${WORKERS_LOKI_USERNAME:-}
+      LOKI_PASSWORD: ${WORKERS_LOKI_PASSWORD:-}
+      LOKI_BATCH_INTERVAL_SEC: ${WORKERS_LOKI_BATCH_INTERVAL_SEC:-5}
+      LOKI_BATCH_MAX_BUFFER: ${WORKERS_LOKI_BATCH_MAX_BUFFER:-10000}
+    ports:
+      - "${WORKERS_PORT:-4122}:4122"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4122/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - omnichat-net
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${WEB_NEXT_PUBLIC_API_BASE_URL}
+        NEXT_PUBLIC_WS_URL: ${WEB_NEXT_PUBLIC_WS_URL}
+        NEXT_PUBLIC_WS_PATH: ${WEB_NEXT_PUBLIC_WS_PATH:-/ws}
+        NEXT_PUBLIC_DEFAULT_LOCALE: ${WEB_NEXT_PUBLIC_DEFAULT_LOCALE:-uk}
+        NEXT_PUBLIC_SENTRY_DSN: ${WEB_NEXT_PUBLIC_SENTRY_DSN:-}
+        NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${WEB_NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-0.05}
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: ${WEB_NEXT_PUBLIC_SENTRY_ENVIRONMENT:-production}
+        NEXT_PUBLIC_SENTRY_RELEASE: ${WEB_NEXT_PUBLIC_SENTRY_RELEASE:-}
+        SENTRY_DSN: ${WEB_SENTRY_DSN:-}
+        SENTRY_TRACES_SAMPLE_RATE: ${WEB_SENTRY_TRACES_SAMPLE_RATE:-0.05}
+        SENTRY_ENVIRONMENT: ${WEB_SENTRY_ENVIRONMENT:-production}
+        SENTRY_RELEASE: ${WEB_SENTRY_RELEASE:-}
+        SENTRY_ORG: ${WEB_SENTRY_ORG:-}
+        SENTRY_PROJECT: ${WEB_SENTRY_PROJECT:-}
+        SENTRY_AUTH_TOKEN: ${WEB_SENTRY_AUTH_TOKEN:-}
+        SENTRY_URL: ${WEB_SENTRY_URL:-https://sentry.io/}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${WEB_PORT:-3000}
+      SENTRY_DSN: ${WEB_SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${WEB_SENTRY_TRACES_SAMPLE_RATE:-0.05}
+      SENTRY_ENVIRONMENT: ${WEB_SENTRY_ENVIRONMENT:-production}
+      SENTRY_RELEASE: ${WEB_SENTRY_RELEASE:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - omnichat-net
+
+volumes:
+  omnichat_postgres_prod:
+  omnichat_redis_prod:
+  omnichat_minio_prod:
+
+networks:
+  omnichat-net:
+    name: omnichat-net

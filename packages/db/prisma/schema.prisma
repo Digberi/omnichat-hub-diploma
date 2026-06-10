@@ -1,0 +1,620 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum IdentityProvider {
+  EMAIL
+  GOOGLE
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum Channel {
+  OLX
+  PROM
+  ROZETKA
+}
+
+enum ChannelAuthType {
+  OAUTH
+  TOKEN
+}
+
+enum ConversationContextType {
+  LISTING
+  PRODUCT
+  ORDER
+}
+
+enum MessageDirection {
+  IN
+  OUT
+}
+
+enum MessageDeliveryStatus {
+  SENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum AttachmentKind {
+  IMAGE
+  VIDEO
+  DOCUMENT
+}
+
+enum TemplateScope {
+  GLOBAL
+  CHANNEL
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  partial
+  refunded
+}
+
+enum ShippingStatus {
+  not_shipped
+  shipped
+  delivered
+  returned
+}
+
+enum OutboxEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+model User {
+  id                 String   @id @default(cuid())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  displayName        String?
+  defaultWorkspaceId String?
+
+  identities   Identity[]
+  sessions     Session[]
+  memberships  Membership[]
+  deviceTokens DevicePushToken[]
+  auditLogs    AuditLog[]
+
+  @@index([createdAt])
+}
+
+model Identity {
+  id                String           @id @default(cuid())
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  provider          IdentityProvider
+  providerAccountId String
+  email             String?
+  emailVerifiedAt   DateTime?
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@index([email])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  refreshTokenHash String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+
+  userAgent String?
+  ipAddress String?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model EmailOtp {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  email      String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int      @default(0)
+  consumedAt DateTime?
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  name      String
+
+  // Per-channel connection caps. Counted against enabled ChannelAccount rows
+  // (disabled accounts don't count, so a user can reconnect a different OLX
+  // profile after disabling the previous one). Bump per-workspace for VIP
+  // sellers who legitimately operate multiple OLX storefronts.
+  maxOlxAccounts Int @default(1)
+
+  memberships       Membership[]
+  channelAccounts   ChannelAccount[]
+  conversations     Conversation[]
+  messages          Message[]
+  attachments       Attachment[]
+  shortLinks        ShortLink[]
+  tags              Tag[]
+  statuses          Status[]
+  templateCategories TemplateCategory[]
+  templates         Template[]
+  settings          WorkspaceSettings?
+  deviceTokens      DevicePushToken[]
+  auditLogs         AuditLog[]
+  outboxEvents      OutboxEvent[]
+  dailyRollups      WorkspaceDailyRollup[]
+  deks              ChannelDek[]
+  rozetkaOrderStates RozetkaOrderState[]
+
+  @@index([createdAt])
+}
+
+model Membership {
+  id        String         @id @default(cuid())
+  createdAt DateTime       @default(now())
+  role      MembershipRole @default(OWNER)
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model WorkspaceSettings {
+  workspaceId String    @id
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  autoArchiveDays              Int     @default(7)
+  openContextExternalDirect    Boolean @default(false)
+  pushNewMessageEnabled        Boolean @default(true)
+  pushSendErrorEnabled         Boolean @default(true)
+  pushSnoozeEnabled            Boolean @default(false)
+  pushSyncErrorEnabled         Boolean @default(false)
+  pushExpiryEnabled            Boolean @default(false)
+  notificationPrefsJson        Json?
+
+  @@index([updatedAt])
+}
+
+model ChannelAccount {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  channel            Channel
+  alias              String
+  externalAccountId  String?
+  authType           ChannelAuthType
+  authDataEncrypted  String?
+  isEnabled          Boolean @default(true)
+  lastSyncAt         DateTime?
+  lastError          String?
+
+  conversations      Conversation[]
+  syncCheckpoint     ChannelSyncCheckpoint?
+  rozetkaOrderStates RozetkaOrderState[]
+
+  @@index([workspaceId])
+  @@index([channel])
+  @@index([lastSyncAt])
+}
+
+model ChannelSyncCheckpoint {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  channelAccountId String @unique
+  channelAccount   ChannelAccount @relation(fields: [channelAccountId], references: [id], onDelete: Cascade)
+
+  cursor        String?
+  lastMessageAt DateTime?
+}
+
+model ChannelDek {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  version      Int
+  encryptedDek String
+  kekKeyId     String
+  isActive     Boolean   @default(true)
+  rotatedAt    DateTime?
+
+  @@unique([workspaceId, version])
+  @@index([workspaceId, isActive])
+}
+
+model Status {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  name      String
+  color     String
+  icon      String
+  sortOrder Int     @default(0)
+  isSystem  Boolean @default(false)
+
+  conversations Conversation[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, sortOrder])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  name     String
+  color    String
+  icon     String
+  isSystem Boolean @default(false)
+
+  conversationTags ConversationTag[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  channelAccountId String
+  channelAccount   ChannelAccount @relation(fields: [channelAccountId], references: [id], onDelete: Cascade)
+
+  channel                 Channel
+  externalConversationId   String?
+  externalBuyerId          String?
+  buyerDisplayName         String
+  buyerPhone               String?
+  buyerAvatarUrl           String?
+  buyerIsOnline            Boolean  @default(false)
+  buyerLastSeenAt          DateTime?
+
+  // derived/state
+  needsReply    Boolean  @default(false)
+  isArchived    Boolean  @default(false)
+  archivedAt    DateTime?
+  snoozedUntil  DateTime?
+  isPinnedInAll Boolean  @default(false)
+  pinnedAt      DateTime?
+
+  lastActivityAt     DateTime?
+  lastIncomingAt     DateTime?
+  lastSellerReplyAt  DateTime?
+
+  // seller-side metadata (optional)
+  paymentStatus   PaymentStatus?
+  shippingStatus  ShippingStatus?
+  ttn             String?
+  orderAmount     Int?
+  sellerNote      String?
+  followUpAt      DateTime?
+  buyerHistoryJson Json?
+
+  // single status
+  statusId String?
+  status   Status? @relation(fields: [statusId], references: [id], onDelete: SetNull)
+
+  // context
+  contextType        ConversationContextType?
+  contextTitle       String?
+  contextPrice       Int?
+  contextCurrency    String?
+  contextThumbUrl    String?
+  contextExternalUrl String?
+  contextExternalId  String?
+
+  // Channel-side order status (Rozetka today; OLX/Prom don't expose a
+  // comparable concept yet). Worker writes the latest status on every
+  // `rozetka_order_status_changed` event so the inbox header can render
+  // "Доставляється", "Скасовано" etc. as a chip without the web having
+  // to walk Message.metadata. Both fields free-text so we don't burn
+  // a typed enum on Rozetka's 50+ ids.
+  contextStatusId   String?
+  contextStatusName String?
+
+  messages Message[]
+  tags     ConversationTag[]
+
+  @@index([workspaceId, lastActivityAt])
+  @@index([workspaceId, needsReply])
+  @@index([workspaceId, isArchived])
+  @@index([channelAccountId, externalConversationId])
+  @@index([workspaceId, isArchived, needsReply, lastActivityAt])
+  @@index([workspaceId, followUpAt])
+}
+
+model ConversationTag {
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  tagId String
+  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([conversationId, tagId])
+  @@index([tagId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  externalMessageId String?
+  clientMessageId   String?
+
+  direction MessageDirection
+  text      String?
+  sentAt    DateTime?
+
+  deliveryStatus MessageDeliveryStatus @default(SENT)
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  failedAt       DateTime?
+  errorCode      String?
+  errorMessage   String?
+
+  metadata Json?
+
+  attachments Attachment[]
+
+  @@index([conversationId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@index([externalMessageId])
+  @@unique([conversationId, externalMessageId])
+  @@unique([conversationId, clientMessageId])
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  kind         AttachmentKind
+  mimeType     String
+  sizeBytes    Int
+  originalName String?
+
+  storageKey String
+  expiresAt  DateTime?
+
+  shortLink ShortLink?
+
+  @@index([workspaceId, createdAt])
+  @@index([expiresAt])
+}
+
+model ShortLink {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  token        String @unique
+  attachmentId String @unique
+  attachment   Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  expiresAt       DateTime
+  lastAccessedAt  DateTime?
+  accessCount     Int @default(0)
+
+  @@index([expiresAt])
+}
+
+model TemplateCategory {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  name      String
+  sortOrder Int @default(0)
+
+  templates Template[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, sortOrder])
+}
+
+model Template {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  scope      TemplateScope
+  channel    Channel?
+  categoryId String?
+  category   TemplateCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  title   String
+  content String
+
+  usageCount Int @default(0)
+
+  @@index([workspaceId, scope])
+  @@index([workspaceId, channel])
+}
+
+model DevicePushToken {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  platform  DevicePlatform
+  token     String
+  isEnabled Boolean @default(true)
+
+  @@unique([platform, token])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action     String
+  entityType String
+  entityId   String?
+  payload    Json?
+
+  @@index([workspaceId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model OutboxEvent {
+  id          String          @id @default(cuid())
+  createdAt   DateTime        @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  type        String
+  payload     Json
+  aggregateId String
+
+  wsDeliveredAt   DateTime?
+  pushDeliveredAt DateTime?
+
+  status        OutboxEventStatus @default(PENDING)
+  lockedAt      DateTime?
+  lockId        String?
+  attempts      Int              @default(0)
+  nextAttemptAt DateTime         @default(now())
+  processedAt   DateTime?
+  lastError     String?
+
+  @@index([workspaceId, status, nextAttemptAt])
+  @@index([status, nextAttemptAt])
+  @@index([aggregateId, status])
+}
+
+model WorkspaceDailyRollup {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  date               DateTime
+  messagesIn         Int @default(0)
+  messagesOut        Int @default(0)
+  convCreated        Int @default(0)
+  avgFirstResponseMs Int?
+  p95FirstResponseMs Int?
+
+  @@unique([workspaceId, date])
+  @@index([workspaceId, date])
+}
+
+model RozetkaOrderState {
+  id                String   @id @default(cuid())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspaceId       String
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  channelAccountId  String
+  channelAccount    ChannelAccount @relation(fields: [channelAccountId], references: [id], onDelete: Cascade)
+
+  externalOrderId   String
+  lastSeenStatus    String
+  lastSeenAt        DateTime
+
+  @@unique([channelAccountId, externalOrderId])
+  @@index([workspaceId])
+}

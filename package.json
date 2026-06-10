@@ -1,0 +1,73 @@
+{
+  "name": "omnichat-hub",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.5.0",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "dev": "turbo dev --parallel",
+    "dev:web": "turbo dev --filter=web",
+    "dev:mobile": "pnpm --filter mobile start",
+    "dev:mobile:dev-client": "pnpm --filter mobile start:dev-client",
+    "dev:api": "turbo dev --filter=api",
+    "dev:workers": "turbo dev --filter=workers",
+    "openapi:export": "pnpm --filter @omnichat/contracts build && pnpm --filter @omnichat/domain build && pnpm --filter @omnichat/db build && pnpm --filter @omnichat/observability build && pnpm --filter @omnichat/kms build && pnpm --filter api build && pnpm --filter api openapi:export",
+    "api-client:generate": "pnpm run openapi:export && pnpm --filter @omnichat/api-client generate && pnpm --filter @omnichat/api-client build",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "pnpm --filter @omnichat/e2e test:e2e",
+    "test:e2e:watch": "pnpm --filter @omnichat/e2e test:e2e:watch",
+    "infra:up": "docker compose -f infra/compose/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/compose/docker-compose.yml down",
+    "infra:prod:up": "docker compose --env-file infra/compose/.env.prod -f infra/compose/docker-compose.prod.yml up -d --build",
+    "infra:prod:down": "docker compose --env-file infra/compose/.env.prod -f infra/compose/docker-compose.prod.yml down",
+    "infra:monitoring:up": "docker compose -f infra/compose/docker-compose.monitoring.yml up -d",
+    "infra:monitoring:down": "docker compose -f infra/compose/docker-compose.monitoring.yml down",
+    "infra:obs:up": "docker compose -f infra/compose/docker-compose.observability.yml up -d",
+    "infra:obs:down": "docker compose -f infra/compose/docker-compose.observability.yml down",
+    "infra:obs:logs": "docker compose -f infra/compose/docker-compose.observability.yml logs -f",
+    "sentry:upload:api": "bash scripts/sentry/upload-node-sourcemaps.sh apps/api/dist",
+    "sentry:upload:workers": "bash scripts/sentry/upload-node-sourcemaps.sh apps/workers/dist",
+    "sentry:upload:web": "pnpm --filter web exec sentry-cli sourcemaps upload --release \"$SENTRY_RELEASE\" --url-prefix \"~/_next\" --validate --rewrite apps/web/.next",
+    "fmt": "prettier --write .",
+    "infra:pulumi:preview": "pnpm --filter @omnichat/pulumi-infra preview",
+    "infra:pulumi:up": "pnpm --filter @omnichat/pulumi-infra up",
+    "infra:pulumi:destroy": "pnpm --filter @omnichat/pulumi-infra destroy"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "infra/*"
+  ],
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@digberi/pulumi-infisical",
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "@scarf/scarf",
+      "@sentry/cli",
+      "@swc/core",
+      "esbuild",
+      "msgpackr-extract",
+      "prisma",
+      "protobufjs",
+      "sharp",
+      "unrs-resolver"
+    ]
+  },
+  "devDependencies": {
+    "@sentry/cli": "3.2.0",
+    "@types/node": "^22.16.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9.32.0",
+    "turbo": "^2.5.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,7 @@
+name: omnichat
+runtime:
+  name: nodejs
+  options:
+    packagemanager: pnpm
+main: ./src
+description: Omnichat production baseline on DigitalOcean App Platform, Vercel, Cloudflare DNS, and managed observability

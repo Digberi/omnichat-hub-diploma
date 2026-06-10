@@ -1,0 +1,215 @@
+{
+  "name": "@omnichat/observability",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/core/index.cjs",
+  "module": "./dist/core/index.js",
+  "types": "./src/core/index.ts",
+  "typesVersions": {
+    "*": {
+      "node": [
+        "./src/node/index.ts"
+      ],
+      "vercel": [
+        "./src/vercel/index.ts"
+      ],
+      "browser": [
+        "./src/browser/index.ts"
+      ],
+      "expo": [
+        "./src/expo/index.ts"
+      ],
+      "workers": [
+        "./src/workers/index.ts"
+      ],
+      "nest": [
+        "./src/nest/index.ts"
+      ],
+      "testing/no-op": [
+        "./src/testing/no-op.ts"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/core/index.d.ts",
+        "default": "./dist/core/index.js"
+      },
+      "require": {
+        "types": "./dist/core/index.d.cts",
+        "default": "./dist/core/index.cjs"
+      }
+    },
+    "./node": {
+      "import": {
+        "types": "./dist/node/index.d.ts",
+        "default": "./dist/node/index.js"
+      },
+      "require": {
+        "types": "./dist/node/index.d.cts",
+        "default": "./dist/node/index.cjs"
+      }
+    },
+    "./vercel": {
+      "import": {
+        "types": "./dist/vercel/index.d.ts",
+        "default": "./dist/vercel/index.js"
+      },
+      "require": {
+        "types": "./dist/vercel/index.d.cts",
+        "default": "./dist/vercel/index.cjs"
+      }
+    },
+    "./browser": {
+      "import": {
+        "types": "./dist/browser/index.d.ts",
+        "default": "./dist/browser/index.js"
+      },
+      "require": {
+        "types": "./dist/browser/index.d.cts",
+        "default": "./dist/browser/index.cjs"
+      }
+    },
+    "./expo": {
+      "import": {
+        "types": "./dist/expo/index.d.ts",
+        "default": "./dist/expo/index.js"
+      },
+      "require": {
+        "types": "./dist/expo/index.d.cts",
+        "default": "./dist/expo/index.cjs"
+      }
+    },
+    "./workers": {
+      "import": {
+        "types": "./dist/workers/index.d.ts",
+        "default": "./dist/workers/index.js"
+      },
+      "require": {
+        "types": "./dist/workers/index.d.cts",
+        "default": "./dist/workers/index.cjs"
+      }
+    },
+    "./nest": {
+      "import": {
+        "types": "./dist/nest/index.d.ts",
+        "default": "./dist/nest/index.js"
+      },
+      "require": {
+        "types": "./dist/nest/index.d.cts",
+        "default": "./dist/nest/index.cjs"
+      }
+    },
+    "./testing/no-op": {
+      "import": {
+        "types": "./dist/testing/no-op.d.ts",
+        "default": "./dist/testing/no-op.js"
+      },
+      "require": {
+        "types": "./dist/testing/no-op.d.cts",
+        "default": "./dist/testing/no-op.cjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api-logs": "^0.57.0",
+    "@opentelemetry/core": "^1.30.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.57.0",
+    "@opentelemetry/sdk-metrics": "^1.30.0",
+    "pino": "^9.5.0",
+    "zod": "^3.23.8"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.55.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/instrumentation-document-load": "^0.40.0",
+    "@opentelemetry/instrumentation-fetch": "^0.57.0",
+    "@opentelemetry/instrumentation-user-interaction": "^0.40.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/sdk-trace-web": "^1.30.0",
+    "@sentry/browser": "^9.0.0 || ^10.0.0",
+    "@sentry/node": "^9.0.0 || ^10.0.0",
+    "@vercel/otel": "^1.14.0",
+    "pino-opentelemetry-transport": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/sdk-node": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-trace-web": {
+      "optional": true
+    },
+    "@opentelemetry/auto-instrumentations-node": {
+      "optional": true
+    },
+    "@opentelemetry/exporter-trace-otlp-http": {
+      "optional": true
+    },
+    "@opentelemetry/exporter-logs-otlp-http": {
+      "optional": true
+    },
+    "@opentelemetry/instrumentation-fetch": {
+      "optional": true
+    },
+    "@opentelemetry/instrumentation-document-load": {
+      "optional": true
+    },
+    "@opentelemetry/instrumentation-user-interaction": {
+      "optional": true
+    },
+    "@vercel/otel": {
+      "optional": true
+    },
+    "@sentry/node": {
+      "optional": true
+    },
+    "@sentry/browser": {
+      "optional": true
+    },
+    "@nestjs/common": {
+      "optional": true
+    },
+    "@nestjs/core": {
+      "optional": true
+    },
+    "pino-opentelemetry-transport": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.55.0",
+    "@opentelemetry/context-zone": "^1.30.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/instrumentation": "^0.57.0",
+    "@opentelemetry/instrumentation-document-load": "^0.40.0",
+    "@opentelemetry/instrumentation-fetch": "^0.57.0",
+    "@opentelemetry/instrumentation-user-interaction": "^0.40.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/sdk-logs": "^0.57.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.0",
+    "@opentelemetry/sdk-trace-web": "^1.30.0",
+    "@types/node": "^22.16.5",
+    "@vercel/otel": "^1.14.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "rxjs": "^7.8.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.0"
+  }
+}

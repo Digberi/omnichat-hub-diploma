@@ -1,0 +1,63 @@
+groups:
+  - name: omnichat-runtime
+    rules:
+      - alert: APIHealthDown
+        expr: probe_success{job="api_health"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API /health is down"
+          description: "Blackbox probe failed for {{ $labels.instance }} for more than 1 minute."
+
+      - alert: APIReadinessDown
+        expr: probe_success{job="api_ready"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API /ready is down"
+          description: "Readiness probe failed (DB/Redis/Storage dependency issue likely)."
+
+      - alert: WorkersHealthDown
+        expr: probe_success{job="workers_health"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: workers
+        annotations:
+          summary: "Workers /health is down"
+          description: "Workers process health endpoint is not available."
+
+      - alert: WorkersReadinessDown
+        expr: probe_success{job="workers_ready"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: workers
+        annotations:
+          summary: "Workers /ready is down"
+          description: "Workers readiness probe failed (DB/Redis dependency issue likely)."
+
+      - alert: WebDown
+        expr: probe_success{job="web_up"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: web
+        annotations:
+          summary: "Web is unavailable"
+          description: "Web root endpoint is not responding with HTTP 2xx."
+
+      - alert: APIReadySlow
+        expr: probe_duration_seconds{job="api_ready"} > 3
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "API readiness response is slow"
+          description: "Readiness probe duration exceeded 3s for 5 minutes."
+

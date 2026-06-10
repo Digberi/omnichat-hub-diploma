@@ -1,0 +1,101 @@
+receivers:
+  # Server-to-collector OTLP receivers (api / workers). Bearer-auth required;
+  # the token never leaves the DO App Platform secret store.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        auth:
+          authenticator: bearertokenauth/otlp
+      http:
+        endpoint: 0.0.0.0:4318
+        auth:
+          authenticator: bearertokenauth/otlp
+
+  # Client-to-collector OTLP receiver (browser / Expo). Public, no auth -- the
+  # alternative would be shipping the Bearer token in a JS/RN bundle, which is
+  # worse than just accepting unauthenticated writes. CORS allowlist + the
+  # firewall rule on this port limit blast radius; the redaction processor on
+  # every pipeline scrubs values that look like Bearer tokens / Sentry / DO /
+  # Grafana credentials before anything reaches Grafana Cloud.
+  otlp/client:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4319
+        cors:
+          allowed_origins:
+            - https://app.omnichat.to
+            - https://www.omnichat.to
+            - https://omnichat.to
+          allowed_headers:
+            - "*"
+          max_age: 7200
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+  redaction:
+    allow_all_keys: true
+    blocked_values:
+      - "Bearer\\s+[A-Za-z0-9._-]+"
+      - "sntryu_[a-z0-9]{60,}"
+      - "dop_v1_[a-z0-9]{64}"
+      - "glsa_[a-zA-Z0-9_-]+"
+
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 100
+    policies:
+      - { name: errors-always, type: status_code, status_code: { status_codes: [ERROR] } }
+      - { name: slow-always, type: latency, latency: { threshold_ms: 1000 } }
+      - { name: sample-rest, type: probabilistic, probabilistic: { sampling_percentage: 5 } }
+
+extensions:
+  file_storage/queue:
+    directory: /var/lib/otelcol/queue
+    timeout: 1s
+  # Gates inbound OTLP requests: clients must send "Authorization: Bearer <OTLP_INBOUND_TOKEN>".
+  # Separate from the outbound Grafana Cloud credential -- compromise containment.
+  bearertokenauth/otlp:
+    scheme: "Bearer"
+    token: "${env:OTLP_INBOUND_TOKEN}"
+  # Outbound auth to Grafana Cloud unified OTLP gateway -- Basic auth with stack ID as username,
+  # access-policy token (glc_...) as password. The token must carry logs:write+metrics:write+traces:write scopes.
+  basicauth/grafana:
+    client_auth:
+      username: "${env:GRAFANA_OTLP_INSTANCE_ID}"
+      password: "${env:GRAFANA_OTLP_AUTH}"
+
+exporters:
+  otlphttp/grafana:
+    endpoint: ${env:GRAFANA_OTLP_ENDPOINT}
+    auth:
+      authenticator: basicauth/grafana
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      num_consumers: 4
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 5m
+
+service:
+  extensions: [file_storage/queue, bearertokenauth/otlp, basicauth/grafana]
+  pipelines:
+    traces:  { receivers: [otlp, otlp/client], processors: [redaction, tail_sampling, batch], exporters: [otlphttp/grafana] }
+    logs:    { receivers: [otlp, otlp/client], processors: [redaction, batch],                exporters: [otlphttp/grafana] }
+    metrics: { receivers: [otlp, otlp/client], processors: [batch],                            exporters: [otlphttp/grafana] }
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888

@@ -1,0 +1,115 @@
+name: Infra Drift Detection
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: infra-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  drift:
+    # Self-hosted on dev-ci. See infra-deploy.yml for context.
+    runs-on: [self-hosted, dev-ci]
+    timeout-minutes: 45
+    env:
+      PNPM_STORE_DIR: ${{ github.workspace }}/../../cache/pnpm-store
+      PULUMI_ORG: ${{ vars.PULUMI_ORG }}
+      PULUMI_PROJECT: ${{ vars.PULUMI_PROJECT }}
+      PULUMI_STACK: ${{ vars.PULUMI_STACK }}
+      ROOT_DOMAIN: ${{ vars.ROOT_DOMAIN }}
+      APP_SUBDOMAIN: ${{ vars.APP_SUBDOMAIN }}
+      API_SUBDOMAIN: ${{ vars.API_SUBDOMAIN }}
+      REPO_SLUG: ${{ vars.REPO_SLUG }}
+      REPO_BRANCH: ${{ vars.REPO_BRANCH }}
+      REGION: ${{ vars.REGION }}
+      DO_PROJECT_NAME: ${{ vars.DO_PROJECT_NAME }}
+      VERCEL_PROJECT_NAME: ${{ vars.VERCEL_PROJECT_NAME }}
+      CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+      POSTGRES_SIZE: ${{ vars.POSTGRES_SIZE }}
+      POSTGRES_VERSION: ${{ vars.POSTGRES_VERSION }}
+      REDIS_SIZE: ${{ vars.REDIS_SIZE }}
+      REDIS_VERSION: ${{ vars.REDIS_VERSION }}
+      SENTRY_ENVIRONMENT: ${{ vars.SENTRY_ENVIRONMENT }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT_WEB: ${{ vars.SENTRY_PROJECT_WEB }}
+      SENTRY_URL: ${{ vars.SENTRY_URL }}
+      SENTRY_TRACES_SAMPLE_RATE: ${{ vars.SENTRY_TRACES_SAMPLE_RATE }}
+      GRAFANA_CREATE_CLOUD_STACK: ${{ vars.GRAFANA_CREATE_CLOUD_STACK }}
+      GRAFANA_CLOUD_REGION: ${{ vars.GRAFANA_CLOUD_REGION }}
+      GRAFANA_STACK_SLUG: ${{ vars.GRAFANA_STACK_SLUG }}
+      GRAFANA_STACK_NAME: ${{ vars.GRAFANA_STACK_NAME }}
+      CHANNEL_SYNC_ROZETKA_ENABLED: ${{ vars.CHANNEL_SYNC_ROZETKA_ENABLED }}
+      CHANNEL_SYNC_ROZETKA_ORDERS_ENABLED: ${{ vars.CHANNEL_SYNC_ROZETKA_ORDERS_ENABLED }}
+      DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+      API_JWT_ACCESS_SECRET: ${{ secrets.API_JWT_ACCESS_SECRET }}
+      API_JWT_REFRESH_SECRET: ${{ secrets.API_JWT_REFRESH_SECRET }}
+      API_AUTH_OTP_PEPPER: ${{ secrets.API_AUTH_OTP_PEPPER }}
+      INFISICAL_DEPLOY_CLIENT_ID: ${{ secrets.INFISICAL_DEPLOY_CLIENT_ID }}
+      INFISICAL_DEPLOY_CLIENT_SECRET: ${{ secrets.INFISICAL_DEPLOY_CLIENT_SECRET }}
+      INFISICAL_KMS_PROJECT_ID: ${{ secrets.INFISICAL_KMS_PROJECT_ID }}
+      INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+      API_METRICS_TOKEN: ${{ secrets.API_METRICS_TOKEN }}
+      WORKERS_METRICS_TOKEN: ${{ secrets.WORKERS_METRICS_TOKEN }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare persistent cache dirs
+        run: mkdir -p "${PNPM_STORE_DIR}"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.5.0
+
+      # PNPM_STORE_DIR env var is set at job level.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pulumi/auth-actions@v1
+        with:
+          organization: ${{ vars.PULUMI_ORG }}
+          requested-token-type: urn:pulumi:token-type:access_token:personal
+          scope: user:Digberi
+
+      - name: Auth for private @digberi/pulumi-infisical
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.DIGBERI_PULUMI_INFISICAL_DEPLOY_KEY }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate infra code
+        run: pnpm --filter @omnichat/pulumi-infra typecheck
+
+      - name: Configure Pulumi stack
+        run: bash scripts/infra/configure-pulumi-stack.sh
+
+      - name: Detect drift
+        run: |
+          set -o pipefail
+          pnpm --filter @omnichat/pulumi-infra exec pulumi preview --stack "${PULUMI_ORG}/${PULUMI_PROJECT}/${PULUMI_STACK}" --refresh --diff 2>&1 | tee pulumi-drift.txt
+          if rg -n "to create|to update|to replace|to delete" pulumi-drift.txt; then
+            echo 'Drift or unapplied infrastructure changes detected.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo 'No drift detected.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload drift log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulumi-drift-${{ github.run_id }}
+          path: pulumi-drift.txt

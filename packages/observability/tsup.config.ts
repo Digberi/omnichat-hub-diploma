@@ -1,0 +1,37 @@
+import { defineConfig } from "tsup"
+
+export default defineConfig({
+  entry: {
+    "core/index": "src/core/index.ts",
+    "node/index": "src/node/index.ts",
+    "vercel/index": "src/vercel/index.ts",
+    "browser/index": "src/browser/index.ts",
+    "expo/index": "src/expo/index.ts",
+    "workers/index": "src/workers/index.ts",
+    "nest/index": "src/nest/index.ts",
+    "testing/no-op": "src/testing/no-op.ts",
+  },
+  format: ["esm", "cjs"],
+  dts: true,
+  sourcemap: true,
+  clean: true,
+  splitting: false,
+  treeshake: true,
+  external: [
+    "@opentelemetry/sdk-node",
+    "@opentelemetry/sdk-trace-web",
+    "@opentelemetry/auto-instrumentations-node",
+    "@opentelemetry/exporter-trace-otlp-http",
+    "@opentelemetry/exporter-logs-otlp-http",
+    "@opentelemetry/instrumentation-fetch",
+    "@opentelemetry/instrumentation-document-load",
+    "@opentelemetry/instrumentation-user-interaction",
+    "@vercel/otel",
+    "@sentry/node",
+    "@sentry/browser",
+    "@nestjs/common",
+    "@nestjs/core",
+    "pino-opentelemetry-transport",
+    "pino",
+  ],
+})

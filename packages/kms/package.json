@@ -1,0 +1,91 @@
+{
+  "name": "@omnichat/kms",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./infisical": {
+      "import": {
+        "types": "./dist/infisical/index.d.ts",
+        "default": "./dist/infisical/index.js"
+      },
+      "require": {
+        "types": "./dist/infisical/index.d.cts",
+        "default": "./dist/infisical/index.cjs"
+      }
+    },
+    "./nest": {
+      "import": {
+        "types": "./dist/nest/index.d.ts",
+        "default": "./dist/nest/index.js"
+      },
+      "require": {
+        "types": "./dist/nest/index.d.cts",
+        "default": "./dist/nest/index.cjs"
+      }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing/index.d.ts",
+        "default": "./dist/testing/index.js"
+      },
+      "require": {
+        "types": "./dist/testing/index.d.cts",
+        "default": "./dist/testing/index.cjs"
+      }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "infisical": [
+        "./src/infisical/index.ts"
+      ],
+      "nest": [
+        "./src/nest/index.ts"
+      ],
+      "testing": [
+        "./src/testing/index.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@omnichat/db": "workspace:*",
+    "@opentelemetry/api": "^1.9.0"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/config": "^3.0.0",
+    "@prisma/client": "^5.0.0 || ^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@nestjs/common": { "optional": true },
+    "@nestjs/config": { "optional": true }
+  },
+  "devDependencies": {
+    "@nestjs/common": "^10.4.0",
+    "@nestjs/config": "^3.3.0",
+    "@types/node": "^22.16.5",
+    "tsup": "^8.3.0",
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.0"
+  }
+}

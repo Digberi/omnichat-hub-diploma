@@ -1,0 +1,208 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    # Self-hosted runner on dev-ci (192.168.0.242). Switched off
+    # `ubuntu-latest` after the org GitHub-hosted runner allowance was
+    # exhausted on 2026-05-18 (jobs failed with `runner_name: ""` and
+    # "spending limit needs to be increased"). All workflows (including
+    # infra-deploy.yml with prod secrets) now run on dev-ci.
+    runs-on: [self-hosted, dev-ci]
+    env:
+      # Persistent caches outside the workspace — dev-ci is a long-lived box,
+      # so the pnpm store and turbo task cache survive across PRs/branches.
+      # pnpm install drops from ~25s to ~3-5s on warm cache; turbo lint/test/
+      # build become near-instant when inputs haven't changed.
+      PNPM_STORE_DIR: ${{ github.workspace }}/../../cache/pnpm-store
+      TURBO_CACHE_DIR: ${{ github.workspace }}/../../cache/turbo
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_URL: ${{ vars.SENTRY_URL }}
+      # Web build (Next.js sourcemap upload uses SENTRY_PROJECT).
+      SENTRY_PROJECT_WEB: ${{ vars.SENTRY_PROJECT_WEB || vars.SENTRY_PROJECT || '' }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT_WEB || vars.SENTRY_PROJECT || '' }}
+      # Node services (used by scripts/sentry/release.sh).
+      SENTRY_PROJECT_API: ${{ vars.SENTRY_PROJECT_API || vars.SENTRY_PROJECT || '' }}
+      SENTRY_PROJECT_WORKERS: ${{ vars.SENTRY_PROJECT_WORKERS || vars.SENTRY_PROJECT || '' }}
+      # Secrets are intentionally disabled for PRs (no uploads from pull_request workflows).
+      SENTRY_AUTH_TOKEN: ${{ github.event_name != 'pull_request' && secrets.SENTRY_AUTH_TOKEN || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Deep enough so the path-filter `git diff origin/main...HEAD`
+          # can resolve the merge base. Default of 1 commit defeats the
+          # diff and forces every PR into the fail-open `needs_e2e=true`
+          # branch (verified on PR #77 first run).
+          fetch-depth: 50
+      - name: Prepare persistent cache dirs
+        run: |
+          # Owned by the runner user — create lazily on first run.
+          mkdir -p "${PNPM_STORE_DIR}" "${TURBO_CACHE_DIR}"
+      - name: Detect which app trees changed (path-filter for E2E)
+        id: changes
+        run: |
+          # On PR: diff against the merge base. On push to main: only the
+          # last commit (cheapest signal). Failure mode (e.g. shallow clone)
+          # is "assume everything changed", which keeps E2E running.
+          set +e
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            BASE_REF="${GITHUB_BASE_REF:-main}"
+            git fetch --no-tags --depth=50 origin "$BASE_REF" >/dev/null 2>&1
+            CHANGED=$(git diff --name-only "origin/$BASE_REF...HEAD" 2>/dev/null)
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null)
+          fi
+          set -e
+          if [[ -z "$CHANGED" ]]; then
+            echo "needs_e2e=true" >> "$GITHUB_OUTPUT"
+            echo "(could not diff — defaulting to needs_e2e=true)"
+            exit 0
+          fi
+          # E2E exercises api + workers (boot + handshake). UI-only / docs /
+          # mobile / infra-only PRs don't need it.
+          if echo "$CHANGED" | grep -qE '^(apps/(api|workers)/|packages/(db|contracts|domain|kms|observability|config)/|pnpm-lock\.yaml$|package\.json$|pnpm-workspace\.yaml$|turbo\.json$|\.github/workflows/ci\.yml$)'; then
+            echo "needs_e2e=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_e2e=false" >> "$GITHUB_OUTPUT"
+            echo "(no api/workers/shared changes — skipping E2E)"
+          fi
+          # Drift gate boots the NestJS app to export OpenAPI, which needs
+          # Redis available. Only run it when the OpenAPI surface could
+          # actually drift: api code, contracts, or the generated client.
+          if echo "$CHANGED" | grep -qE '^(apps/api/|packages/(contracts|api-client)/|pnpm-lock\.yaml$)'; then
+            echo "needs_drift_gate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_drift_gate=false" >> "$GITHUB_OUTPUT"
+            echo "(no api/contracts/api-client changes — skipping drift gate)"
+          fi
+      - name: Derive release identifier
+        id: release
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            RELEASE="${GITHUB_SHA}"
+          else
+            SAFE_REF="${GITHUB_REF_NAME//\//-}"
+            RELEASE="${SAFE_REF}-${GITHUB_SHA}"
+          fi
+
+          echo "SENTRY_RELEASE=${RELEASE}" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_SENTRY_RELEASE=${RELEASE}" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_SENTRY_RELEASE=${RELEASE}" >> "$GITHUB_ENV"
+          echo "SENTRY_RELEASE=${RELEASE}" >> "$GITHUB_OUTPUT"
+          echo "release=${RELEASE}" >> "$GITHUB_OUTPUT"
+          echo "release id: ${RELEASE}"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.5.0
+      # PNPM_STORE_DIR env var is set globally above. We previously used
+      # `pnpm config set store-dir` here, but that writes to a project
+      # `.npmrc` that the drift gate then catches as untracked → CI fail.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # cache: pnpm is intentionally OFF — actions/cache would re-extract
+          # a tarball on every job, defeating the persistent store. The
+          # PNPM_STORE_DIR set above already gives us the same speedup.
+      - name: Auth for private @digberi/pulumi-infisical
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.DIGBERI_PULUMI_INFISICAL_DEPLOY_KEY }}
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client (workspace consumers type-check against it)
+        # pnpm install postinstall hooks are skipped on warm
+        # PNPM_STORE_DIR cache, so node_modules/.prisma/client is missing
+        # on every CI run that didn't bump pnpm-lock.yaml. workers + api
+        # typecheck imports `Prisma.TransactionClient` etc. — without the
+        # generated client they fail with TS2339 on every Prisma type.
+        # Cheap (<5s), idempotent.
+        run: pnpm --filter @omnichat/db exec prisma generate --schema prisma/schema.prisma
+      - name: Bring infra up for drift gate (needs Redis)
+        if: steps.changes.outputs.needs_drift_gate == 'true'
+        run: |
+          set -euo pipefail
+          pnpm infra:up
+          for i in {1..30}; do docker compose -f infra/compose/docker-compose.yml exec -T redis redis-cli ping | grep -q PONG && break; sleep 1; done
+      - name: Generate OpenAPI + api-client (drift gate)
+        if: steps.changes.outputs.needs_drift_gate == 'true'
+        run: |
+          pnpm run api-client:generate
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test
+      - run: pnpm run build
+      - name: Create Sentry release and upload sourcemaps
+        if: github.event_name != 'pull_request' && env.SENTRY_AUTH_TOKEN != '' && env.SENTRY_ORG != ''
+        run: |
+          bash scripts/sentry/release.sh
+          echo "Sentry release step completed"
+      # Build + push api/workers images to DO Container Registry on every
+      # main push. The App Platform spec consumes these via `image:` source
+      # (see infra/pulumi/src/digitalocean.ts) with `deployOnPushes`
+      # enabled, so pushing a fresh `:latest` triggers an App redeploy
+      # automatically — no `pulumi up` needed for code-only changes.
+      # DO no longer rebuilds containers on its side (saves ~10 min/deploy)
+      # and the same artifacts feed the planned K8s migration. dev-ci has
+      # persistent Docker layer cache so this step is cheap on warm builds.
+      # Note: api/workers DOCR build + push lives in .github/workflows/infra-deploy.yml
+      # so it runs BEFORE `pulumi up`. Doing it here meant the two workflows
+      # raced — Infra Deploy could try to update the App with image: source
+      # while CI was still building the image, hitting 404 "tag not found".
+      - name: E2E smoke (infra + api + workers)
+        if: steps.changes.outputs.needs_e2e == 'true'
+        env:
+          NODE_ENV: test
+          PORT: "4121"
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/omnichat
+          REDIS_URL: redis://localhost:6379
+          STORAGE_ENDPOINT: http://localhost:9000
+          STORAGE_REGION: us-east-1
+          STORAGE_BUCKET: omnichat
+          STORAGE_ACCESS_KEY: minioadmin
+          STORAGE_SECRET_KEY: minioadmin
+          JWT_ACCESS_SECRET: ci_dummy_access_secret_0123456789abcdef
+          JWT_REFRESH_SECRET: ci_dummy_refresh_secret_0123456789abcdef
+          AUTH_OTP_PEPPER: ci_dummy_otp_pepper_0123456789abcdef
+          AUTH_OTP_FIXED_CODE: "000000"
+          CORS_ORIGINS: http://localhost:3000
+          LOG_LEVEL: warn
+          E2E_API_BASE_URL: http://localhost:4121
+          E2E_REQUIRE_WORKERS: "1"
+        run: |
+          set -euo pipefail
+
+          pnpm infra:up
+
+          # Wait for infra containers.
+          for i in {1..30}; do docker compose -f infra/compose/docker-compose.yml exec -T postgres pg_isready -U postgres && break; sleep 1; done
+          for i in {1..30}; do docker compose -f infra/compose/docker-compose.yml exec -T redis redis-cli ping | grep -q PONG && break; sleep 1; done
+          for i in {1..30}; do curl -fsS http://localhost:9000/minio/health/live >/dev/null && break; sleep 1; done
+
+          # `prisma generate` writes the generated client to
+          # node_modules/.prisma/client which seed.ts imports. pnpm install
+          # used to trigger it via postinstall, but the persistent
+          # PNPM_STORE_DIR cache from PR #75 short-circuits that hook on
+          # warm cache. Run it explicitly so seed never hits MODULE_NOT_FOUND
+          # on @prisma/client/default.js.
+          pnpm --filter @omnichat/db exec prisma generate --schema prisma/schema.prisma
+          pnpm --filter @omnichat/db prisma:migrate:deploy
+          pnpm --filter @omnichat/db prisma:seed
+
+          node apps/api/dist/main.js &
+          API_PID=$!
+          node apps/workers/dist/main.js &
+          WORKERS_PID=$!
+          trap "kill $API_PID $WORKERS_PID || true; pnpm infra:down || true" EXIT
+
+          # Wait for API.
+          for i in {1..30}; do curl -fsS http://localhost:4121/health >/dev/null && break; sleep 1; done
+
+          pnpm test:e2e

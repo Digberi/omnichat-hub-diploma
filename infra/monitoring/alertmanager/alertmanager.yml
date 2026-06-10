@@ -1,0 +1,17 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: ["alertname", "service", "severity"]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 30m
+
+receivers:
+  - name: default
+    # Configure your integration here (Slack/PagerDuty/Webhook).
+    # Example:
+    # webhook_configs:
+    #   - url: "http://alert-webhook:8080/alerts"
+

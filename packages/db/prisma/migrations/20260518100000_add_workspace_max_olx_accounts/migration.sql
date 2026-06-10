@@ -1,0 +1,2 @@
+ALTER TABLE "Workspace"
+  ADD COLUMN "maxOlxAccounts" INTEGER NOT NULL DEFAULT 1;

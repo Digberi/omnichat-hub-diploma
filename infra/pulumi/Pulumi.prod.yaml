@@ -1,0 +1,36 @@
+config:
+  omnichat:rootDomain: omnichat.to
+  omnichat:githubRepo: Digberi/omnichat-hub
+  omnichat:githubBranch: main
+  omnichat:appSubdomain: app
+  omnichat:apiSubdomain: api
+  omnichat:vercelProjectName: omnichat-web
+  omnichat:doProjectName: omnichat-prod
+  omnichat:region: fra1
+  omnichat:postgresSize: db-s-1vcpu-2gb
+  omnichat:redisSize: db-s-1vcpu-1gb
+  omnichat:postgresVersion: "16"
+  omnichat:redisVersion: "8"
+  omnichat:emailFrom: OmniChat <no-reply@omnichat.to>
+  omnichat:sentryEnvironment: production
+  omnichat:sentryTracesSampleRate: "0.05"
+  omnichat:sentryUrl: https://sentry.io/
+  omnichat:grafanaCreateCloudStack: "false"
+  omnichat:grafanaStackSlug: appomnichat
+  omnichat:grafanaStackName: appomnichat
+  omnichat:cloudflareZoneId: 9183f255ab3bb7574e1540eb7f556efe
+  omnichat:resendApiKey:
+    secure: AAABAJX15BNgdfyHQO4vpryf5sO9Nvqwf6wkaVwtc+9cZyeTlLu9w78tTV2dz+Y+VrIQiqdNCwiv7WMq/9+592RjVr5S
+  omnichat:grafanaCloudAccessPolicyToken:
+    secure: AAABAD19Yk3EsMZvXtU4smgXcCsPfO/oLtmX4k0Qp5n8lFfQBGN2m+W1U1KIj75tm/vHd5bCLMep9FLBI54Av0W5QSfoPH7tgVQQL1wUSeRBrcEy36KV1G/Yz9lhPme7Z3xJ45BFJMq+Gr02JrzVG2pFyPGmjhrSMQkkng/1DJHZHrnddhkaq3icZtye2xo0GNgddVR+vC1IO0MBDVsArKe9oAda8rXimP1Wh4dMxCwLOnRYksFrXHMqkXqlpzHMPoVY3A==
+  omnichat:otelCollectorInboundToken:
+    secure: AAABAPQULA/rCnaEiGYe/7hEsqYoSJNx10GqA1vJodwOhkegS/poewBGHEN/UbjK5Fd1TfGnZwEyT8T5BLuOaJIQsz3gD98+icgziL6IACas9cakqTIQsOwhWZ/yBYMv
+  omnichat:channelSyncRozetkaEnabled: "true"
+  omnichat:migrationsSourceCidrs:
+    - 46.150.81.138/32
+  omnichat:sentryWebDsn:
+    secure: AAABAHDzCyhRRfRIlqycuS/RcwSlmefXjpP0oFs1JvMEJ3KoMFLnFFupmouDyZzw5KVQS8xSRYO3y67GfVYsDl3P1lniI5BZLicTZkQHCJppjnTZGijD+HT/7OPh6Yg0ITDVkts/s+RoFLXOU1Onrd6ABEuhgxk28IQ7ciWgXQ==
+  omnichat:sentryOrg: omnichat-ei
+  omnichat:sentryProjectWeb: omnichat-web
+  omnichat:sentryAuthToken:
+    secure: AAABADEX7vodhtVIMHCQmGC/vtQwGAw4h5NkVL9hH+O6SlEw/n3zDexDd+7q9MN87QI3C7ZB0E+0rLF9ZMXI91Olw/qycPkeL3FwaG+9g/aQdTwkrE2yNNrty/SckO1Kceqgdp0hbA==

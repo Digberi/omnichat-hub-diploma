@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: omnichat
+    ports:
+      - "5432:5432"
+    volumes:
+      - omnichat_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - omnichat_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - omnichat_minio:/data
+  minio-bootstrap:
+    image: minio/mc:latest
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      STORAGE_BUCKET: omnichat
+      STORAGE_ENDPOINT: http://minio:9000
+      ATTACHMENT_TTL_DAYS: 7
+    command: >
+      sh -c '
+      set -eu
+      until mc alias set local ${STORAGE_ENDPOINT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} >/dev/null 2>&1; do
+        echo "waiting for minio"
+        sleep 1
+      done
+
+      mc mb --ignore-existing local/${STORAGE_BUCKET}
+
+      cat > /tmp/minio-lifecycle.json <<EOF
+      {
+        "Rules": [
+          {
+            "ID": "expire-attachments",
+            "Status": "Enabled",
+            "Filter": {
+              "Prefix": "attachments/"
+            },
+            "Expiration": {
+              "Days": ${ATTACHMENT_TTL_DAYS}
+            }
+          }
+        ]
+      }
+      EOF
+
+      mc ilm import local/${STORAGE_BUCKET} /tmp/minio-lifecycle.json
+      '
+
+volumes:
+  omnichat_postgres:
+  omnichat_redis:
+  omnichat_minio:
